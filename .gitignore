@@ -1,0 +1,19 @@
+# --- Dependencies ---
+node_modules/
+
+# --- Environment files (never commit secrets) ---
+.env
+.env.*
+!.env.example
+
+# --- Build output ---
+build/
+dist/
+
+# --- Logs ---
+*.log
+npm-debug.log*
+
+# --- Misc ---
+.DS_Store
+*.map

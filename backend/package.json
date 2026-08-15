@@ -1,0 +1,20 @@
+{
+  "name": "instant-backend",
+  "version": "1.0.0",
+  "description": "INSTANT — IoT energy monitoring backend (Express + MQTT + WebSocket)",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.1",
+    "express": "^4.18.2",
+    "mqtt": "^5.3.4",
+    "ws": "^8.16.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.3"
+  }
+}

@@ -137,6 +137,27 @@ const Chip = styled.span`
   background: ${(p) => (p.$ok ? `${p.theme.green}1f` : `${p.theme.amber}1f`)};
 `;
 
+const DownloadBtn = styled.span`
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 13px 24px;
+  border: none;
+  border-radius: 12px;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  color: #ffffff;
+  background: linear-gradient(135deg, ${(p) => p.theme.cyan}, ${(p) => p.theme.magenta});
+  cursor: pointer;
+  transition: opacity 0.2s, transform 0.15s;
+  box-shadow: 0 8px 22px ${(p) => p.theme.glow};
+
+  &:hover {
+    transform: translateY(-1px);
+  }
+`;
+
 export default function Settings() {
   const { state, saveThresholds, notify } = useApp();
   const [vmax, setVmax] = useState('');
@@ -270,6 +291,26 @@ export default function Settings() {
           </Note>
         </Card>
       </Grid>
+
+      <Card style={{ marginTop: 16 }}>
+        <CardTitle>
+          Android App
+          <Chip $ok>APK</Chip>
+        </CardTitle>
+
+        <Note>
+          Get INSTANT as an Android app &mdash; a Trusted Web Activity that wraps this dashboard in
+          its own window with the app icon. The APK (~1.2&nbsp;MB) is served from this website, so
+          updates come from here. On Android, allow installing apps from unknown sources to
+          sideload it.
+        </Note>
+
+        <div style={{ marginTop: 18 }}>
+          <a href="./apk/instant.apk" download="instant.apk" style={{ textDecoration: 'none' }}>
+            <DownloadBtn>Download APK</DownloadBtn>
+          </a>
+        </div>
+      </Card>
     </>
   );
 }

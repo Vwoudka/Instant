@@ -1,0 +1,16 @@
+[{
+  "relation": ["delegate_permission/common.handle_all_urls"],
+  "target": {
+    "namespace": "web",
+    "site": "https://vwoudka.github.io"
+  }
+}, {
+  "relation": ["delegate_permission/common.handle_all_urls"],
+  "target": {
+    "namespace": "android_app",
+    "package_name": "app.instant.energy",
+    "sha256_cert_fingerprints": [
+      "79:F9:45:9E:86:C1:56:F6:42:20:EE:72:76:92:5D:EB:6F:4E:C5:D3:64:0C:85:9F:DD:44:98:A7:F4:DE:0C:F7"
+    ]
+  }
+}]

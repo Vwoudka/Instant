@@ -17,3 +17,6 @@ npm-debug.log*
 # --- Misc ---
 .DS_Store
 *.map
+
+# --- Android TWA build (local toolchain, not part of the site) ---
+android/

@@ -1,12 +1,18 @@
-import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { getLatest, getConfig, saveConfig } from '../api/client';
 
 const AppContext = createContext(null);
 
 const FRESH_MS = 3 * 60 * 1000; // readings older than 3 min => offline
-const POLL_MS = 20000; // ThingSpeak free tier writes ~every 15 s
+const POLL_MS = 20000; // how often we poll ThingSpeak
 const HISTORY_MS = 5 * 60 * 1000; // rolling chart window
 const HISTORY_CAP = 300;
+// ThingSpeak free tier allows ONE update per channel every 15 s. Writes that
+// land sooner are rejected with HTTP 400, which made rapid relay clicks look
+// like they "snapped back". Cooldown with a small margin so commands always go
+// through, and let polls re-read the config for a while before trusting it.
+const WRITE_COOLDOWN_MS = 16000;
+const RELAY_GRACE_MS = 26000;
 
 const initialState = {
   voltage: 0,
@@ -22,12 +28,23 @@ const initialState = {
   thresholds: { vmax: 240, imax: 15, pmax: 3000 },
   thresholdsSource: 'thingspeak',
   relayLog: [],
+  relayCooldownUntil: 0,
 };
 
 export function AppProvider({ children }) {
   const [state, setState] = useState(initialState);
   const [theme, setTheme] = useState(() => localStorage.getItem('instant-theme') || 'dark');
   const [toasts, setToasts] = useState([]);
+
+  // Latest state, readable from async callbacks without a stale closure.
+  const stateRef = useRef(state);
+  useEffect(() => {
+    stateRef.current = state;
+  });
+
+  // Timestamp of the last config-channel write we attempted, so we can both
+  // enforce the 15 s cooldown and ignore stale config reads right after a write.
+  const lastWriteAtRef = useRef(0);
 
   const notify = useCallback((type, message) => {
     const id = Date.now() + Math.random();
@@ -57,8 +74,13 @@ export function AppProvider({ children }) {
       const thresholds = config
         ? { vmax: config.vmax, imax: config.imax, pmax: config.pmax }
         : s.thresholds;
-      const relay = config ? config.relay : s.relay;
       const connected = !!(latest && Date.now() - latest.t < FRESH_MS);
+
+      // Right after we publish a relay command the config read can still return
+      // the old value (in-flight request or ThingSpeak latency). Trust our
+      // optimistic state until the grace window has passed.
+      const recentlyCommanded = Date.now() - lastWriteAtRef.current < RELAY_GRACE_MS;
+      const relay = config && !recentlyCommanded ? config.relay : s.relay;
 
       const base = {
         ...s,
@@ -103,34 +125,62 @@ export function AppProvider({ children }) {
     return () => clearInterval(id);
   }, [poll]);
 
-  // Optimistically flip the relay, publish the command to ThingSpeak. The
-  // firmware picks it up within ~10 s; the next poll reflects the result.
+  // Optimistically flip the relay, then publish the command to ThingSpeak. The
+  // free tier rejects a second update within 15 s, so clicks during the cooldown
+  // are ignored (with a hint) instead of being silently lost or reverted.
   const toggleRelay = useCallback(async () => {
-    const next = state.relay === 'ON' ? 'OFF' : 'ON';
-    const prev = state.relay;
-    setState((s) => ({ ...s, relay: next }));
+    const now = Date.now();
+    const since = now - lastWriteAtRef.current;
+    if (since < WRITE_COOLDOWN_MS) {
+      notify('info', `ThingSpeak allows one config update per 15 s \u2014 retry in ${Math.ceil((WRITE_COOLDOWN_MS - since) / 1000)} s`);
+      return;
+    }
+
+    const next = stateRef.current.relay === 'ON' ? 'OFF' : 'ON';
+    lastWriteAtRef.current = now;
+    setState((s) => ({ ...s, relay: next, relayCooldownUntil: now + WRITE_COOLDOWN_MS }));
+
     try {
       await saveConfig({
-        vmax: state.thresholds.vmax,
-        imax: state.thresholds.imax,
-        pmax: state.thresholds.pmax,
+        vmax: stateRef.current.thresholds.vmax,
+        imax: stateRef.current.thresholds.imax,
+        pmax: stateRef.current.thresholds.pmax,
         relay: next,
       });
+      // Keep the optimistic value — don't let a stale poll override it.
+      setState((s) => ({ ...s, relay: next }));
       notify('success', `Relay command sent: ${next}`);
     } catch (err) {
-      setState((s) => ({ ...s, relay: prev }));
-      notify('error', err.message || 'Failed to send relay command');
+      // Never guess after a failure: re-read what's actually stored so the UI
+      // shows the truth instead of snapping to a stale value.
+      let actual = next;
+      try {
+        const c = await getConfig();
+        actual = c.relay;
+      } catch (_) {
+        /* keep optimistic value on sync failure */
+      }
+      setState((s) => ({ ...s, relay: actual }));
+      notify('error', `${err.message || 'Failed to send relay command'} (1 update / 15 s limit)`);
     }
-  }, [state.relay, state.thresholds, notify]);
+  }, [notify]);
 
   const saveThresholds = useCallback(
     async (payload) => {
+      const now = Date.now();
+      const since = now - lastWriteAtRef.current;
+      if (since < WRITE_COOLDOWN_MS) {
+        notify('info', `ThingSpeak allows one config update per 15 s \u2014 retry in ${Math.ceil((WRITE_COOLDOWN_MS - since) / 1000)} s`);
+        return false;
+      }
+      lastWriteAtRef.current = now;
+
       try {
         await saveConfig({
           vmax: Number(payload.vmax),
           imax: Number(payload.imax),
           pmax: Number(payload.pmax),
-          relay: payload.relay || state.relay,
+          relay: payload.relay || stateRef.current.relay,
         });
         setState((s) => ({
           ...s,
@@ -140,15 +190,16 @@ export function AppProvider({ children }) {
             pmax: Number(payload.pmax),
           },
           relay: payload.relay || s.relay,
+          relayCooldownUntil: now + WRITE_COOLDOWN_MS,
         }));
         notify('success', 'Thresholds published to ThingSpeak');
         return true;
       } catch (err) {
-        notify('error', err.message || 'Failed to save thresholds');
+        notify('error', `${err.message || 'Failed to save thresholds'} (1 update / 15 s limit)`);
         return false;
       }
     },
-    [state.relay, notify]
+    [notify]
   );
 
   const resetFault = useCallback(() => {

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import styled, { css, keyframes } from 'styled-components';
 import { useApp } from '../context/AppContext';
 import { PlugIcon } from './Icons';
@@ -117,10 +117,20 @@ const Hint = styled.p`
 export default function RelaySwitch() {
   const { state, toggleRelay } = useApp();
   const [busy, setBusy] = useState(false);
+  const [, tick] = useState(0);
   const on = state.relay === 'ON';
 
+  // Re-render every second so the cooldown countdown stays accurate.
+  useEffect(() => {
+    const id = setInterval(() => tick((x) => x + 1), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  const cooldownLeft = Math.max(0, Math.ceil((state.relayCooldownUntil - Date.now()) / 1000));
+  const locked = cooldownLeft > 0;
+
   const handle = async () => {
-    if (busy) return;
+    if (busy || locked) return;
     setBusy(true);
     await toggleRelay();
     setBusy(false);
@@ -134,17 +144,20 @@ export default function RelaySwitch() {
       <Track
         $on={on}
         onClick={handle}
-        disabled={busy}
+        disabled={busy || locked}
         role="switch"
         aria-checked={on}
         aria-label="Relay switch"
       >
         <Knob $on={on}>{busy ? <Spinner /> : <PlugIcon size={18} />}</Knob>
       </Track>
-      <StateLine $on={on}>{busy ? 'SWITCHING' : on ? 'RELAY ON' : 'RELAY OFF'}</StateLine>
+      <StateLine $on={on}>
+        {busy ? 'SWITCHING' : locked ? `WAIT ${cooldownLeft} s` : on ? 'RELAY ON' : 'RELAY OFF'}
+      </StateLine>
       <Hint>
         Single click sends &quot;{on ? 'OFF' : 'ON'}&quot; to the ThingSpeak config channel
-        &mdash; the device applies it within ~10&nbsp;s
+        &mdash; the device applies it within ~10&nbsp;s. ThingSpeak free tier allows one update
+        per 15&nbsp;s, so the switch briefly locks after each command.
       </Hint>
     </Panel>
   );

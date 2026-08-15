@@ -126,8 +126,7 @@ export default function RelaySwitch() {
     return () => clearInterval(id);
   }, []);
 
-  const cooldownLeft = Math.max(0, Math.ceil((state.relayCooldownUntil - Date.now()) / 1000));
-  const locked = cooldownLeft > 0;
+  const locked = state.relayCooldownUntil > Date.now();
 
   const handle = async () => {
     if (busy || locked) return;
@@ -152,7 +151,7 @@ export default function RelaySwitch() {
         <Knob $on={on}>{busy ? <Spinner /> : <PlugIcon size={18} />}</Knob>
       </Track>
       <StateLine $on={on}>
-        {busy ? 'SWITCHING' : locked ? `WAIT ${cooldownLeft} s` : on ? 'RELAY ON' : 'RELAY OFF'}
+        {busy ? 'SWITCHING' : on ? 'RELAY ON' : 'RELAY OFF'}
       </StateLine>
       <Hint>
         Single click sends &quot;{on ? 'OFF' : 'ON'}&quot; to the ThingSpeak config channel

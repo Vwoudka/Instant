@@ -5,10 +5,10 @@ import AppLineChart from '../components/AppLineChart';
 import { getHistory } from '../api/client';
 
 const RANGES = [
-  { label: '1 hour', hours: 1 },
-  { label: '6 hours', hours: 6 },
-  { label: '24 hours', hours: 24 },
-  { label: '7 days', hours: 168 },
+  { label: '1 hour', minutes: 60 },
+  { label: '6 hours', minutes: 360 },
+  { label: '24 hours', minutes: 1440 },
+  { label: '7 days', minutes: 10080 },
 ];
 
 const TopBar = styled.div`
@@ -121,17 +121,14 @@ const Badge = styled.span`
 `;
 
 export default function History() {
-  const { notify, state, connected } = useApp();
-  const [range, setRange] = useState(24);
+  const { notify } = useApp();
+  const [range, setRange] = useState(1440);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    // No backend (static GitHub Pages / file://) — show the live local buffer.
-    if (!connected) {
-      setData(null);
-      return undefined;
-    }
+    // ThingSpeak serves the stored history directly from the browser, so it
+    // works even when the device is offline (it returns the last known data).
     let active = true;
     setLoading(true);
     getHistory(range)
@@ -147,9 +144,9 @@ export default function History() {
     return () => {
       active = false;
     };
-  }, [range, connected, notify]);
+  }, [range, notify]);
 
-  const points = connected ? data?.points || [] : state.history;
+  const points = data?.points || [];
   const labels = points.map((p) => new Date(p.t).toLocaleString([], { hour12: false }));
   const series = [
     { label: 'Power (W)', data: points.map((p) => p.power), color: '#A96BFF', fill: true, borderWidth: 2 },
@@ -157,7 +154,7 @@ export default function History() {
   ];
 
   const recent = points.slice(-12).reverse();
-  const relayLog = (connected ? data?.relayLog : state.relayLog || []).slice(-10).reverse();
+  const relayLog = (data?.relayLog || []).slice(-10).reverse();
 
   return (
     <>
@@ -165,7 +162,7 @@ export default function History() {
         <Title>History</Title>
         <Ranges>
           {RANGES.map((r) => (
-            <RangeBtn key={r.hours} $active={range === r.hours} onClick={() => setRange(r.hours)}>
+            <RangeBtn key={r.minutes} $active={range === r.minutes} onClick={() => setRange(r.minutes)}>
               {r.label}
             </RangeBtn>
           ))}
@@ -177,7 +174,7 @@ export default function History() {
         {loading ? (
           <Center>Loading\u2026</Center>
         ) : points.length === 0 ? (
-          <Center>No history yet &mdash; waiting for data from MQTT.</Center>
+          <Center>No history yet &mdash; waiting for data from ThingSpeak.</Center>
         ) : (
           <AppLineChart labels={labels} series={series} height={340} />
         )}

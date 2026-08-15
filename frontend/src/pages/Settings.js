@@ -183,7 +183,7 @@ export default function Settings() {
     setSaving(false);
   };
 
-  const fromMqtt = state.thresholdsSource === 'mqtt';
+  const fromTs = state.thresholdsSource === 'thingspeak';
 
   return (
     <>
@@ -193,11 +193,11 @@ export default function Settings() {
         <Card>
           <CardTitle>
             Safety thresholds
-            <Chip $ok={fromMqtt}>{fromMqtt ? 'From device (MQTT)' : 'Local defaults'}</Chip>
+            <Chip $ok={fromTs}>{fromTs ? 'From ThingSpeak' : 'Local defaults'}</Chip>
           </CardTitle>
 
           <Field>
-            <FieldLabel>Voltage max (V) &mdash; <code>settings/vmax</code></FieldLabel>
+            <FieldLabel>Voltage max (V) &mdash; <code>field1</code></FieldLabel>
             <Input
               type="number"
               min="1"
@@ -209,7 +209,7 @@ export default function Settings() {
           </Field>
 
           <Field>
-            <FieldLabel>Current max (A) &mdash; <code>settings/imax</code></FieldLabel>
+            <FieldLabel>Current max (A) &mdash; <code>field2</code></FieldLabel>
             <Input
               type="number"
               min="0.1"
@@ -221,7 +221,7 @@ export default function Settings() {
           </Field>
 
           <Field>
-            <FieldLabel>Power max (W) &mdash; <code>settings/pmax</code></FieldLabel>
+            <FieldLabel>Power max (W) &mdash; <code>field3</code></FieldLabel>
             <Input
               type="number"
               min="1"
@@ -233,14 +233,15 @@ export default function Settings() {
           </Field>
 
           <Note>
-            Published to MQTT topics <code>settings/vmax</code>, <code>settings/imax</code> and{' '}
-            <code>settings/pmax</code> — the device picks them up instantly. The backend recomputes
-            the fault status whenever a live reading exceeds these limits.
+            Published to the ThingSpeak config channel ({'3428310'}) fields{' '}
+            <code>field1</code>, <code>field2</code> and <code>field3</code> — the device polls it
+            every 10&nbsp;s and applies the new limits. A fault is flagged whenever a live reading
+            exceeds these limits.
           </Note>
         </Card>
 
         <Card>
-          <CardTitle>Relay default state &mdash; <code>relay/command</code></CardTitle>
+          <CardTitle>Relay default state &mdash; <code>field4</code></CardTitle>
 
           <SegRow>
             <SegBtn $active={relayDefault === 'ON'} onClick={() => setRelayDefault('ON')}>
@@ -253,19 +254,19 @@ export default function Settings() {
 
           <Note>
             Current live relay state: <strong>{state.relay}</strong>. Saving publishes the default
-            on <code>relay/command</code> so the device can restore it on boot.
+            on config channel <code>field4</code> so the device can restore it on boot.
           </Note>
 
           <div style={{ marginTop: 18 }}>
             <SaveBtn onClick={handleSave} disabled={saving}>
-              {saving ? 'Publishing\u2026' : 'Publish settings over MQTT'}
+              {saving ? 'Publishing\u2026' : 'Publish settings to ThingSpeak'}
             </SaveBtn>
           </div>
 
           <Note>
-            REST API: <code>POST /api/thresholds</code> &middot; MQTT topics:{' '}
-            <code>settings/vmax</code>, <code>settings/imax</code>, <code>settings/pmax</code>,{' '}
-            <code>relay/command</code>
+            REST API: <code>POST https://api.thingspeak.com/update</code> &middot; config channel
+            <code> 3428310</code>: <code>field1</code>=vMax, <code>field2</code>=iMax,{' '}
+            <code>field3</code>=pMax, <code>field4</code>=relay command
           </Note>
         </Card>
       </Grid>

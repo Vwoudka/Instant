@@ -40,17 +40,6 @@ const BrandMark = styled.div`
   box-shadow: 0 0 16px ${(p) => p.theme.glow};
 `;
 
-const DemoBadge = styled.span`
-  font-family: 'Inter', sans-serif;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 1px;
-  padding: 3px 8px;
-  border-radius: 8px;
-  color: ${(p) => p.theme.amber};
-  border: 1px solid ${(p) => p.theme.amber};
-`;
-
 const Nav = styled.nav`
   display: flex;
   gap: 6px;
@@ -115,7 +104,7 @@ const ThemeBtn = styled.button`
 
 export default function Header() {
   const { state, connected, theme, toggleTheme } = useApp();
-  const online = state.demoMode || (connected && state.connected);
+  const online = connected && state.connected;
 
   return (
     <HeaderBar>
@@ -124,7 +113,6 @@ export default function Header() {
           <LogoIcon size={20} />
         </BrandMark>
         <span>INSTANT</span>
-        {state.demoMode && <DemoBadge>DEMO</DemoBadge>}
       </Brand>
 
       <Nav>
@@ -136,7 +124,7 @@ export default function Header() {
       <Right>
         <Status>
           <StatusDot on={online} />
-          <span>{state.demoMode ? 'Demo stream' : online ? 'Live' : 'Offline'}</span>
+          <span>{online ? 'Live' : 'Offline'}</span>
         </Status>
         <ThemeBtn onClick={toggleTheme} title="Toggle theme" aria-label="Toggle theme">
           {theme === 'dark' ? <SunIcon size={18} /> : <MoonIcon size={18} />}

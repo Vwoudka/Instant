@@ -112,8 +112,8 @@ const Hint = styled.p`
   }
 `;
 
-// Big satisfying relay toggle. One click publishes ON/OFF to `relay/command`
-// over MQTT — the device applies it instantly.
+// Big satisfying relay toggle. One click publishes ON/OFF to the ThingSpeak
+// config channel — the device polls it and applies the command within ~10 s.
 export default function RelaySwitch() {
   const { state, toggleRelay } = useApp();
   const [busy, setBusy] = useState(false);
@@ -143,8 +143,8 @@ export default function RelaySwitch() {
       </Track>
       <StateLine $on={on}>{busy ? 'SWITCHING' : on ? 'RELAY ON' : 'RELAY OFF'}</StateLine>
       <Hint>
-        Single click sends &quot;{on ? 'OFF' : 'ON'}&quot; to <code>relay/command</code> over MQTT
-        &mdash; the device applies it instantly
+        Single click sends &quot;{on ? 'OFF' : 'ON'}&quot; to the ThingSpeak config channel
+        &mdash; the device applies it within ~10&nbsp;s
       </Hint>
     </Panel>
   );

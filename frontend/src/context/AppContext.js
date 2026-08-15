@@ -1,8 +1,12 @@
-import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
-import useWebSocket from '../hooks/useWebSocket';
-import { getThresholds, postRelay, postThresholds } from '../api/client';
+import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import { getLatest, getConfig, saveConfig } from '../api/client';
 
 const AppContext = createContext(null);
+
+const FRESH_MS = 3 * 60 * 1000; // readings older than 3 min => offline
+const POLL_MS = 20000; // ThingSpeak free tier writes ~every 15 s
+const HISTORY_MS = 5 * 60 * 1000; // rolling chart window
+const HISTORY_CAP = 300;
 
 const initialState = {
   voltage: 0,
@@ -14,58 +18,16 @@ const initialState = {
   connected: false,
   demoMode: false,
   lastUpdated: null,
-  history: [], // last 5 minutes, capped at 300 points
-  thresholds: { vmax: 240, imax: 10, pmax: 2000 },
-  thresholdsSource: 'local',
+  history: [],
+  thresholds: { vmax: 240, imax: 15, pmax: 3000 },
+  thresholdsSource: 'thingspeak',
   relayLog: [],
 };
-
-// Processes one streamed message (snapshot / incremental data / status). Also
-// used by the built-in simulator so the UI behaves identically in both modes.
-function makeReducer() {
-  return (msg, setState) => {
-    if (msg.type === 'snapshot') {
-      setState((s) => ({
-        ...s,
-        ...msg.data,
-        history: (msg.data.history || [])
-          .filter((p) => p.t > Date.now() - 5 * 60 * 1000)
-          .slice(-300),
-      }));
-    } else if (msg.type === 'data') {
-      setState((s) => {
-        const { history: _omit, ...rest } = msg.data;
-        const point = {
-          t: Date.now(),
-          voltage: rest.voltage ?? s.voltage,
-          current: rest.current ?? s.current,
-          power: rest.power ?? s.power,
-          pf: rest.pf ?? s.pf,
-        };
-        const history = [...s.history, point]
-          .filter((p) => p.t > Date.now() - 5 * 60 * 1000)
-          .slice(-300);
-        return { ...s, ...rest, history };
-      });
-    } else if (msg.type === 'status') {
-      setState((s) => ({ ...s, connected: msg.connected, demoMode: !!msg.demo }));
-    }
-  };
-}
-
-const reduce = makeReducer();
 
 export function AppProvider({ children }) {
   const [state, setState] = useState(initialState);
   const [theme, setTheme] = useState(() => localStorage.getItem('instant-theme') || 'dark');
   const [toasts, setToasts] = useState([]);
-  const [localDemo, setLocalDemo] = useState(false);
-
-  // Real-time stream from the backend WebSocket.
-  const applyMessage = useCallback((msg) => reduce(msg, setState), []);
-  const connected = useWebSocket(applyMessage);
-  const connectedRef = useRef(connected);
-  connectedRef.current = connected;
 
   const notify = useCallback((type, message) => {
     const id = Date.now() + Math.random();
@@ -75,110 +37,101 @@ export function AppProvider({ children }) {
 
   const dismissToast = useCallback((id) => setToasts((t) => t.filter((x) => x.id !== id)), []);
 
-  // If the backend is completely unreachable (e.g. static GitHub Pages or the
-  // user opened the build straight from disk), fall back to a built-in browser
-  // simulator so the dashboard still comes alive.
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      if (!connectedRef.current) setLocalDemo(true);
-    }, 6000);
-    return () => clearTimeout(timer);
-  }, []);
-
-  // If the backend becomes reachable later, drop back to the live stream.
-  useEffect(() => {
-    if (connected && localDemo) setLocalDemo(false);
-  }, [connected, localDemo]);
-
-  // Local demo simulator — mirrors the backend DEMO_MODE behaviour, but runs
-  // entirely inside the browser.
-  useEffect(() => {
-    if (!localDemo) return undefined;
-
-    let voltage = 229;
-    let current = 4.1;
-
-    // Seed the chart with the last minute so it is not empty on first paint.
-    const seed = [];
-    const now = Date.now();
-    for (let i = 60; i >= 1; i--) {
-      seed.push({
-        t: now - i * 2000,
-        voltage: 229 + (Math.random() - 0.5) * 4,
-        current: 4 + (Math.random() - 0.5) * 1.2,
-        power: 900 + (Math.random() - 0.5) * 160,
-        pf: 0.9 + (Math.random() - 0.5) * 0.06,
-      });
+  // Poll ThingSpeak on an interval; merge the latest reading + config into state
+  // and flag the stream online/offline based on data freshness.
+  const poll = useCallback(async () => {
+    let latest = null;
+    let config = null;
+    try {
+      latest = await getLatest();
+    } catch (_) {
+      /* ThingSpeak unreachable -> offline */
+    }
+    try {
+      config = await getConfig();
+    } catch (_) {
+      /* keep previous config */
     }
 
-    setState((s) => ({
-      ...s,
-      connected: true,
-      demoMode: true,
-      history: [...seed, ...s.history].slice(-300),
-    }));
+    setState((s) => {
+      const thresholds = config
+        ? { vmax: config.vmax, imax: config.imax, pmax: config.pmax }
+        : s.thresholds;
+      const relay = config ? config.relay : s.relay;
+      const connected = !!(latest && Date.now() - latest.t < FRESH_MS);
 
-    const emit = () => {
-      voltage = Math.max(205, Math.min(248, voltage + (Math.random() - 0.5) * 5));
-      current = Math.max(0.3, Math.min(14, current + (Math.random() - 0.5) * 1.4));
-      const power = Math.max(40, voltage * current * (0.82 + Math.random() * 0.18));
-      const pf = Math.min(0.98, Math.max(0.62, 0.88 + (Math.random() - 0.5) * 0.1));
-      applyMessage({
-        type: 'data',
-        data: {
-          voltage: Math.round(voltage * 10) / 10,
-          current: Math.round(current * 100) / 100,
-          power: Math.round(power * 10) / 10,
-          pf: Math.round(pf * 100) / 100,
-          fault: voltage > 245 || current > 9 || power > 2200 ? 'Safety limit exceeded' : null,
-          lastUpdated: new Date().toISOString(),
-        },
-      });
-    };
+      const base = {
+        ...s,
+        thresholds,
+        thresholdsSource: 'thingspeak',
+        relay,
+        connected,
+        demoMode: false,
+      };
+      if (!latest) return base;
 
-    emit();
-    const interval = setInterval(emit, 2000);
-    return () => clearInterval(interval);
-  }, [localDemo, applyMessage]);
+      const point = { t: latest.t, voltage: latest.voltage, current: latest.current, power: latest.power, pf: latest.pf };
+      const last = s.history.length ? s.history[s.history.length - 1] : null;
+      const history =
+        last && last.t === latest.t
+          ? s.history
+          : [...s.history, point]
+              .filter((p) => p.t > Date.now() - HISTORY_MS)
+              .slice(-HISTORY_CAP);
 
-  // Load thresholds (+ relay default) from the backend on startup.
-  useEffect(() => {
-    getThresholds()
-      .then((t) => {
-        setState((s) => ({
-          ...s,
-          thresholds: { vmax: t.vmax, imax: t.imax, pmax: t.pmax },
-          relay: t.relay || s.relay,
-          thresholdsSource: t.source || 'local',
-        }));
-      })
-      .catch(() => {
-        /* backend not reachable yet — live data still streams via WS */
-      });
+      const exceeded =
+        latest.voltage > thresholds.vmax ||
+        latest.current > thresholds.imax ||
+        latest.power > thresholds.pmax;
+
+      return {
+        ...base,
+        voltage: latest.voltage,
+        current: latest.current,
+        power: latest.power,
+        pf: latest.pf,
+        lastUpdated: latest.lastUpdated,
+        history,
+        fault: exceeded ? 'Safety limit exceeded' : null,
+      };
+    });
   }, []);
 
-  // Optimistically flip the relay, publish over MQTT via the backend. In local
-  // demo mode the relay just flips locally.
+  useEffect(() => {
+    poll();
+    const id = setInterval(poll, POLL_MS);
+    return () => clearInterval(id);
+  }, [poll]);
+
+  // Optimistically flip the relay, publish the command to ThingSpeak. The
+  // firmware picks it up within ~10 s; the next poll reflects the result.
   const toggleRelay = useCallback(async () => {
     const next = state.relay === 'ON' ? 'OFF' : 'ON';
     const prev = state.relay;
     setState((s) => ({ ...s, relay: next }));
-    if (localDemo) {
-      notify('success', `Relay switched ${next} (demo)`);
-      return;
-    }
     try {
-      await postRelay(next);
-      notify('success', `Relay switched ${next}`);
+      await saveConfig({
+        vmax: state.thresholds.vmax,
+        imax: state.thresholds.imax,
+        pmax: state.thresholds.pmax,
+        relay: next,
+      });
+      notify('success', `Relay command sent: ${next}`);
     } catch (err) {
       setState((s) => ({ ...s, relay: prev }));
-      notify('error', err.message || 'Failed to toggle relay');
+      notify('error', err.message || 'Failed to send relay command');
     }
-  }, [state.relay, localDemo, notify]);
+  }, [state.relay, state.thresholds, notify]);
 
   const saveThresholds = useCallback(
     async (payload) => {
-      if (localDemo) {
+      try {
+        await saveConfig({
+          vmax: Number(payload.vmax),
+          imax: Number(payload.imax),
+          pmax: Number(payload.pmax),
+          relay: payload.relay || state.relay,
+        });
         setState((s) => ({
           ...s,
           thresholds: {
@@ -188,24 +141,14 @@ export function AppProvider({ children }) {
           },
           relay: payload.relay || s.relay,
         }));
-        notify('success', 'Thresholds saved (demo)');
-        return true;
-      }
-      try {
-        const res = await postThresholds(payload);
-        setState((s) => ({
-          ...s,
-          thresholds: { vmax: res.vmax, imax: res.imax, pmax: res.pmax },
-          relay: res.relay || s.relay,
-        }));
-        notify('success', 'Thresholds published over MQTT');
+        notify('success', 'Thresholds published to ThingSpeak');
         return true;
       } catch (err) {
         notify('error', err.message || 'Failed to save thresholds');
         return false;
       }
     },
-    [localDemo, notify]
+    [state.relay, notify]
   );
 
   const resetFault = useCallback(() => {
@@ -223,8 +166,7 @@ export function AppProvider({ children }) {
 
   const value = {
     state,
-    connected, // WebSocket link status
-    localDemo,
+    connected: state.connected,
     theme,
     toasts,
     notify,

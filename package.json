@@ -1,15 +1,12 @@
 {
   "name": "instant",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
-  "description": "INSTANT — vivid IoT energy monitoring & relay control (React + Node.js)",
+  "description": "INSTANT — vivid IoT energy monitoring & relay control (React + ThingSpeak)",
   "scripts": {
-    "install-all": "npm install --prefix backend && npm install --prefix frontend",
-    "dev": "concurrently -n backend,frontend -c blue,magenta \"npm run dev --prefix backend\" \"npm start --prefix frontend\"",
+    "install": "npm install --prefix frontend",
+    "dev": "npm start --prefix frontend",
     "build": "npm run build --prefix frontend",
-    "start": "npm start --prefix backend"
-  },
-  "devDependencies": {
-    "concurrently": "^8.2.2"
+    "preview": "npx serve -s frontend/build"
   }
 }
